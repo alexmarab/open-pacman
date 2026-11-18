@@ -9,9 +9,34 @@ const DIRS = {
   down: { x: 0, y: 1 },
 };
 const OPPOSITE = { left: 'right', right: 'left', up: 'down', down: 'up' };
+// Orden de desempate comun a toda la IA: tras la direccion actual.
+const TIE_ORDER = [ 'left', 'right', 'up', 'down' ];
 
-const PACMAN_SPEED = 0.125; // 1/8 celda/frame -> alinea cada 8 frames
-const GHOST_SPEED = 0.1;    // 1/10 celda/frame
+const PACMAN_SPEED = 0.0625; // 1/16 celda/frame -> alinea cada 16 frames
+
+// Personalidad por tipo: velocidad (celdas/frame) y frames de espera en la
+// guarida antes de poder salir. Las fracciones 1/16 y 1/20 alinean en enteros
+// (cada 16 y 20 frames) y no rompen la logica de giro por celda.
+const GHOST_RULES = {
+  chaser: { speed: 0.0625, releaseAfter: 0 },
+  ambusher: { speed: 0.05, releaseAfter: 90 },
+  flanker: { speed: 0.05, releaseAfter: 180 },
+  shy: { speed: 0.05, releaseAfter: 270 },
+};
+
+// Estado inicial de un fantasma a partir de su entrada en GHOST_STARTS.
+function ghostFromStart( start ) {
+  const rule = GHOST_RULES[ start.kind ] || GHOST_RULES.chaser;
+  return {
+    x: start.x,
+    y: start.y,
+    dir: 'up',
+    speed: rule.speed,
+    kind: start.kind,
+    state: 'waiting', // 'waiting' | 'exiting' | 'active'
+    wait: rule.releaseAfter, // frames restantes en 'waiting'
+  };
+}
 
 // Crea una partida nueva. Copia MAZE (pristino) a game.grid para poder comer
 // dots sin destruir el original, y reiniciar.
@@ -36,13 +61,7 @@ function createGame() {
       nextDir: null,
       speed: PACMAN_SPEED,
     },
-    ghosts: GHOST_STARTS.map( ( g ) => ( {
-      x: g.x,
-      y: g.y,
-      dir: 'up',
-      speed: GHOST_SPEED,
-      kind: g.kind,
-    } ) ),
+    ghosts: GHOST_STARTS.map( ghostFromStart ),
   };
 }
 
@@ -51,14 +70,15 @@ function aligned( v ) {
 }
 
 // Una celda es muro para el actor dado?
-//   pacman: bloqueado por pared (1) y puerta (3)
-//   ghost:  bloqueado solo por pared (1)
+//   pacman:     bloqueado por pared (1) y puerta (3)
+//   ghost:      bloqueado solo por pared (1)
+//   ghost-wait: fantasma esperando en la guarida; la puerta (3) tambien le bloquea
 function isWall( grid, x, y, actor ) {
   if ( y < 0 || y >= grid.length ) return true;
   if ( x < 0 || x >= grid[ 0 ].length ) return true;
   const v = grid[ y ][ x ];
   if ( v === 1 ) return true;
-  if ( v === 3 && actor === 'pacman' ) return true;
+  if ( v === 3 && ( actor === 'pacman' || actor === 'ghost-wait' ) ) return true;
   return false;
 }
 
@@ -110,46 +130,202 @@ function movePacman( game ) {
   wrapTunnel( p, width );
 }
 
-function decideGhost( game, g ) {
+// En la fila del tunel, salir por un borde entra por el opuesto.
+function wrapX( x, y, width ) {
+  if ( y !== TUNNEL_ROW ) return x;
+  if ( x < 0 ) return width - 1;
+  if ( x >= width ) return 0;
+  return x;
+}
+
+// Candidatos de giro en una celda, en orden de desempate: primero la direccion
+// actual y luego left/right/up/down. Se excluye el giro de 180 salvo que sea la
+// unica salida (callejon sin salida).
+function ghostChoices( grid, g ) {
+  const options = [];
+  for ( const dir of [ g.dir, ...TIE_ORDER ] ) {
+    if ( !dir || dir === OPPOSITE[ g.dir ] || options.includes( dir ) ) continue;
+    if ( canMove( grid, g.x, g.y, dir, 'ghost' ) ) options.push( dir );
+  }
+  if ( options.length ) return options;
+  const back = OPPOSITE[ g.dir ];
+  return canMove( grid, g.x, g.y, back, 'ghost' ) ? [ back ] : [];
+}
+
+// Distancia en celdas por el camino mas corto entre dos celdas (BFS sobre la
+// rejilla, tunel incluido). Devuelve Infinity si no hay camino.
+function bfsDistance( grid, from, to ) {
+  const W = grid[ 0 ].length;
+  const H = grid.length;
+  const dist = new Array( W * H ).fill( -1 );
+  const start = from.y * W + from.x;
+  const goal = to.y * W + to.x;
+  dist[ start ] = 0;
+  const queue = [ start ];
+  for ( let head = 0; head < queue.length; head++ ) {
+    const cell = queue[ head ];
+    if ( cell === goal ) return dist[ cell ];
+    const cx = cell % W;
+    const cy = ( cell - cx ) / W;
+    for ( const dir of TIE_ORDER ) {
+      if ( !canMove( grid, cx, cy, dir, 'ghost' ) ) continue;
+      const d = DIRS[ dir ];
+      const ny = cy + d.y;
+      const nx = wrapX( cx + d.x, ny, W );
+      const next = ny * W + nx;
+      if ( dist[ next ] !== -1 ) continue;
+      dist[ next ] = dist[ cell ] + 1;
+      queue.push( next );
+    }
+  }
+  return Infinity;
+}
+
+// Direccion del primer paso del camino mas corto (BFS) desde la celda de 'from'
+// hasta 'to'. Aplica la regla de desempate comun: sin giro de 180 salvo
+// callejon, candidatos en orden de ghostChoices y gana el primero con mejor
+// distancia. Devuelve null si no hay camino.
+function nextStepTo( grid, from, to ) {
+  const choices = ghostChoices( grid, from );
+  let best = null;
+  let bestDist = Infinity;
+  for ( const dir of choices ) {
+    const d = DIRS[ dir ];
+    const ny = from.y + d.y;
+    const nx = wrapX( from.x + d.x, ny, grid[ 0 ].length );
+    const dist = bfsDistance( grid, { x: nx, y: ny }, to );
+    if ( dist < bestDist ) {
+      bestDist = dist;
+      best = dir;
+    }
+  }
+  return Number.isFinite( bestDist ) ? best : null;
+}
+
+// Distancia Manhattan entre dos celdas (acepta posiciones fraccionarias).
+function manhattan( a, b ) {
+  return Math.abs( Math.round( a.x ) - Math.round( b.x ) ) + Math.abs( Math.round( a.y ) - Math.round( b.y ) );
+}
+
+// Recorta una celda a los limites de la rejilla.
+function clampCell( grid, x, y ) {
+  return {
+    x: Math.max( 0, Math.min( grid[ 0 ].length - 1, x ) ),
+    y: Math.max( 0, Math.min( grid.length - 1, y ) ),
+  };
+}
+
+// Celda objetivo de las personalidades que no usan BFS.
+function ghostTarget( game, g ) {
   const grid = game.grid;
   const p = game.pacman;
+  const px = Math.round( p.x );
+  const py = Math.round( p.y );
+  const pd = DIRS[ p.dir ] || { x: 0, y: 0 };
 
-  const options = Object.keys( DIRS ).filter(
-    ( dir ) => dir !== OPPOSITE[ g.dir ] && canMove( grid, g.x, g.y, dir, 'ghost' )
-  );
-  // Sin salida (callejon): permitir el giro de 180.
-  const choices = options.length ? options : [ '' + OPPOSITE[ g.dir ] ];
-
-  if ( g.kind === 'hunter' ) {
-    const px = Math.round( p.x );
-    const py = Math.round( p.y );
-    let best = choices[ 0 ];
-    let bestDist = Infinity;
-    for ( const dir of choices ) {
-      const d = DIRS[ dir ];
-      const nx = g.x + d.x;
-      const ny = g.y + d.y;
-      const dist = Math.abs( nx - px ) + Math.abs( ny - py );
-      if ( dist < bestDist ) {
-        bestDist = dist;
-        best = dir;
-      }
-    }
-    g.dir = best;
-  } else {
-    g.dir = choices[ Math.floor( Math.random() * choices.length ) ];
+  let target = { x: px, y: py };
+  if ( g.kind === 'ambusher' ) {
+    // 4 celdas por delante de Pac-Man, recortado a los limites.
+    target = clampCell( grid, px + pd.x * 4, py + pd.y * 4 );
+  } else if ( g.kind === 'flanker' ) {
+    // 2 x (Pac-Man + 2 al frente) - celda del chaser: ataca por el lado
+    // opuesto al rojo. Recortado a los limites.
+    const chaser = game.ghosts.find( ( x ) => x.kind === 'chaser' );
+    const cx = chaser ? Math.round( chaser.x ) : px;
+    const cy = chaser ? Math.round( chaser.y ) : py;
+    target = clampCell( grid, 2 * ( px + pd.x * 2 ) - cx, 2 * ( py + pd.y * 2 ) - cy );
   }
+
+  // Si el objetivo cae en muro, apuntar a la celda de Pac-Man.
+  return isWall( grid, target.x, target.y, 'ghost' ) ? { x: px, y: py } : target;
 }
+
+// Direccion que minimiza (o maximiza) la distancia Manhattan al objetivo entre
+// los candidatos, en su orden de desempate.
+function greedyDir( g, choices, target, minimize ) {
+  let best = choices[ 0 ];
+  let bestDist = minimize ? Infinity : -Infinity;
+  for ( const dir of choices ) {
+    const d = DIRS[ dir ];
+    const dist = Math.abs( g.x + d.x - target.x ) + Math.abs( g.y + d.y - target.y );
+    if ( minimize ? dist < bestDist : dist > bestDist ) {
+      bestDist = dist;
+      best = dir;
+    }
+  }
+  return best;
+}
+
+const SHY_RADIUS = 8; // el shy huye si esta a 8 celdas o menos de Pac-Man
+
+function decideGhost( game, g ) {
+  const grid = game.grid;
+  const choices = ghostChoices( grid, g );
+  if ( !choices.length ) return;
+
+  const pac = { x: Math.round( game.pacman.x ), y: Math.round( game.pacman.y ) };
+
+  if ( g.kind === 'chaser' ) {
+    const step = nextStepTo( grid, g, pac );
+    // Sin camino: una direccion aleatoria valida para no quedarse quieto.
+    g.dir = step || choices[ Math.floor( Math.random() * choices.length ) ];
+    return;
+  }
+
+  if ( g.kind === 'shy' ) {
+    const near = manhattan( g, pac ) <= SHY_RADIUS;
+    // Lejos persigue la celda de Pac-Man; cerca huye maximizando la distancia.
+    g.dir = greedyDir( g, choices, pac, !near );
+    return;
+  }
+
+  if ( g.kind === 'ambusher' || g.kind === 'flanker' ) {
+    g.dir = greedyDir( g, choices, ghostTarget( game, g ), true );
+    return;
+  }
+
+  g.dir = choices[ Math.floor( Math.random() * choices.length ) ];
+}
+
+// Ciclo de la guarida. 'waiting' cuenta frames y rebota en vertical dentro de
+// la pen; 'exiting' sube recto por la puerta hasta el pasillo de la fila 11 y
+// pasa a 'active'; 'active' usa la personalidad de su tipo.
+const PEN_TOP = 13;
+const PEN_BOTTOM = 15;
+const PEN_EXIT_ROW = 11;
 
 function moveGhost( game, g ) {
   const grid = game.grid;
   const width = grid[ 0 ].length;
 
+  // La espera se mide en frames, no en celdas alineadas.
+  if ( g.state === 'waiting' ) {
+    if ( g.wait > 0 ) g.wait--;
+    if ( g.wait <= 0 ) g.state = 'exiting';
+  }
+
   if ( aligned( g.x ) && aligned( g.y ) ) {
     g.x = Math.round( g.x );
     g.y = Math.round( g.y );
-    decideGhost( game, g );
-    if ( !canMove( grid, g.x, g.y, g.dir, 'ghost' ) ) return;
+
+    let actor = 'ghost';
+    if ( g.state === 'waiting' ) {
+      actor = 'ghost-wait';
+      // Rebote vertical entre las filas 13 y 15 de su columna.
+      if ( g.y <= PEN_TOP ) g.dir = 'down';
+      else if ( g.y >= PEN_BOTTOM ) g.dir = 'up';
+      if ( !canMove( grid, g.x, g.y, g.dir, actor ) ) g.dir = OPPOSITE[ g.dir ];
+    } else if ( g.state === 'exiting' ) {
+      g.dir = 'up';
+      if ( g.y <= PEN_EXIT_ROW ) {
+        g.y = PEN_EXIT_ROW;
+        g.state = 'active';
+      }
+    } else {
+      decideGhost( game, g );
+    }
+
+    if ( !canMove( grid, g.x, g.y, g.dir, actor ) ) return;
   }
 
   const d = DIRS[ g.dir ];
@@ -165,9 +341,7 @@ function resetPositions( game ) {
   p.dir = 'left';
   p.nextDir = null;
   game.ghosts.forEach( ( g, i ) => {
-    g.x = GHOST_STARTS[ i ].x;
-    g.y = GHOST_STARTS[ i ].y;
-    g.dir = 'up';
+    Object.assign( g, ghostFromStart( GHOST_STARTS[ i ] ) );
   } );
 }
 
