@@ -11,7 +11,29 @@ const DIRS = {
 const OPPOSITE = { left: 'right', right: 'left', up: 'down', down: 'up' };
 
 const PACMAN_SPEED = 0.125; // 1/8 celda/frame -> alinea cada 8 frames
-const GHOST_SPEED = 0.1;    // 1/10 celda/frame
+
+// Personalidad por tipo: velocidad (celdas/frame) y frames de espera en la
+// guarida antes de poder salir. Las fracciones 1/8 y 1/10 alinean en enteros.
+const GHOST_RULES = {
+  chaser: { speed: 0.125, releaseAfter: 0 },
+  ambusher: { speed: 0.1, releaseAfter: 90 },
+  flanker: { speed: 0.1, releaseAfter: 180 },
+  shy: { speed: 0.1, releaseAfter: 270 },
+};
+
+// Estado inicial de un fantasma a partir de su entrada en GHOST_STARTS.
+function ghostFromStart( start ) {
+  const rule = GHOST_RULES[ start.kind ] || GHOST_RULES.chaser;
+  return {
+    x: start.x,
+    y: start.y,
+    dir: 'up',
+    speed: rule.speed,
+    kind: start.kind,
+    state: 'waiting', // 'waiting' | 'exiting' | 'active'
+    wait: rule.releaseAfter, // frames restantes en 'waiting'
+  };
+}
 
 // Crea una partida nueva. Copia MAZE (pristino) a game.grid para poder comer
 // dots sin destruir el original, y reiniciar.
@@ -36,13 +58,7 @@ function createGame() {
       nextDir: null,
       speed: PACMAN_SPEED,
     },
-    ghosts: GHOST_STARTS.map( ( g ) => ( {
-      x: g.x,
-      y: g.y,
-      dir: 'up',
-      speed: GHOST_SPEED,
-      kind: g.kind,
-    } ) ),
+    ghosts: GHOST_STARTS.map( ghostFromStart ),
   };
 }
 
@@ -165,9 +181,7 @@ function resetPositions( game ) {
   p.dir = 'left';
   p.nextDir = null;
   game.ghosts.forEach( ( g, i ) => {
-    g.x = GHOST_STARTS[ i ].x;
-    g.y = GHOST_STARTS[ i ].y;
-    g.dir = 'up';
+    Object.assign( g, ghostFromStart( GHOST_STARTS[ i ] ) );
   } );
 }
 
