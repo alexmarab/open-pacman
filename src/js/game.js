@@ -226,6 +226,13 @@ function ghostTarget( game, g ) {
   if ( g.kind === 'ambusher' ) {
     // 4 celdas por delante de Pac-Man, recortado a los limites.
     target = clampCell( grid, px + pd.x * 4, py + pd.y * 4 );
+  } else if ( g.kind === 'flanker' ) {
+    // 2 x (Pac-Man + 2 al frente) - celda del chaser: ataca por el lado
+    // opuesto al rojo. Recortado a los limites.
+    const chaser = game.ghosts.find( ( x ) => x.kind === 'chaser' );
+    const cx = chaser ? Math.round( chaser.x ) : px;
+    const cy = chaser ? Math.round( chaser.y ) : py;
+    target = clampCell( grid, 2 * ( px + pd.x * 2 ) - cx, 2 * ( py + pd.y * 2 ) - cy );
   }
 
   // Si el objetivo cae en muro, apuntar a la celda de Pac-Man.
@@ -261,7 +268,7 @@ function decideGhost( game, g ) {
     return;
   }
 
-  if ( g.kind === 'ambusher' ) {
+  if ( g.kind === 'ambusher' || g.kind === 'flanker' ) {
     g.dir = greedyDir( g, choices, ghostTarget( game, g ), true );
     return;
   }
