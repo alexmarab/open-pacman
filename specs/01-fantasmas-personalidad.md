@@ -1,6 +1,6 @@
 # SPEC 01 — Cuatro fantasmas con personalidad propia
 
-> **Estado:** Aprobado
+> **Estado:** Implemented
 > **Depende de:** —
 > **Fecha:** 2026-11-18
 > **Objetivo:** Ampliar el juego a cuatro fantasmas con comportamientos distintos entre sí, incluido un perseguidor agresivo que calcula la ruta más corta real hacia Pac-Man.
