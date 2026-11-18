@@ -52,8 +52,10 @@ const MAZE = MAZE_STR.map( ( row ) => row.split( '' ).map( parseTile ) );
 const TUNNEL_ROW = 14;
 const PACMAN_START = { x: 13, y: 23 };
 const GHOST_STARTS = [
-  { x: 13, y: 14, kind: 'hunter' }, // dentro de la pen
-  { x: 14, y: 14, kind: 'random' }, // dentro de la pen
+  { x: 13, y: 13, kind: 'chaser' }, // rojo,   sale al instante
+  { x: 14, y: 13, kind: 'ambusher' }, // rosa,   sale a los 90 frames
+  { x: 13, y: 14, kind: 'flanker' }, // cian,   sale a los 180 frames
+  { x: 14, y: 14, kind: 'shy' }, // naranja, sale a los 270 frames
 ];
 
 window.MAZE = MAZE;
