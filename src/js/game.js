@@ -255,16 +255,26 @@ function greedyDir( g, choices, target, minimize ) {
   return best;
 }
 
+const SHY_RADIUS = 8; // el shy huye si esta a 8 celdas o menos de Pac-Man
+
 function decideGhost( game, g ) {
   const grid = game.grid;
   const choices = ghostChoices( grid, g );
   if ( !choices.length ) return;
 
+  const pac = { x: Math.round( game.pacman.x ), y: Math.round( game.pacman.y ) };
+
   if ( g.kind === 'chaser' ) {
-    const target = { x: Math.round( game.pacman.x ), y: Math.round( game.pacman.y ) };
-    const step = nextStepTo( grid, g, target );
+    const step = nextStepTo( grid, g, pac );
     // Sin camino: una direccion aleatoria valida para no quedarse quieto.
     g.dir = step || choices[ Math.floor( Math.random() * choices.length ) ];
+    return;
+  }
+
+  if ( g.kind === 'shy' ) {
+    const near = manhattan( g, pac ) <= SHY_RADIUS;
+    // Lejos persigue la celda de Pac-Man; cerca huye maximizando la distancia.
+    g.dir = greedyDir( g, choices, pac, !near );
     return;
   }
 
