@@ -14,6 +14,16 @@ const TIE_ORDER = [ 'left', 'right', 'up', 'down' ];
 
 const PACMAN_SPEED = 0.0625; // 1/16 celda/frame -> alinea cada 16 frames
 
+// Power pellets y modo asustado.
+const PELLET_SCORE = 50; // puntos por power pellet
+const FRIGHTENED_FRAMES = 360; // ~6 s a 60 fps
+const FRIGHTENED_FLASH = 60; // ultimos frames de aviso
+const FRIGHTENED_SPEED = 0.03125; // 1/32 celda/frame
+const EATEN_SPEED = 0.125; // 1/8 celda/frame: los ojos vuelven a la guarida
+const EATEN_WAIT = 60; // frames en la guarida antes de volver a salir
+const GHOST_SCORES = [ 200, 400, 800, 1600 ]; // orden de fantasmas comidos
+const EATEN_TARGET = { x: 13, y: 13 }; // celda de la guarida a la que vuelven los ojos
+
 // Personalidad por tipo: velocidad (celdas/frame) y frames de espera en la
 // guarida antes de poder salir. Las fracciones 1/16 y 1/20 alinean en enteros
 // (cada 16 y 20 frames) y no rompen la logica de giro por celda.
@@ -46,13 +56,22 @@ function createGame() {
   grid[ PACMAN_START.y ][ PACMAN_START.x ] = 0;
 
   let dots = 0;
-  for ( const row of grid ) for ( const v of row ) if ( v === 2 ) dots++;
+  let pellets = 0;
+  for ( const row of grid ) {
+    for ( const v of row ) {
+      if ( v === 2 ) dots++;
+      if ( v === 4 ) pellets++;
+    }
+  }
 
   return {
     state: 'start',
     score: 0,
     lives: 3,
     dotsRemaining: dots,
+    pelletsRemaining: pellets,
+    frightened: 0, // frames de susto restantes; 0 = sin susto
+    eatenCombo: 0, // fantasmas comidos con el pellet actual (0..4)
     grid,
     pacman: {
       x: PACMAN_START.x,
@@ -114,11 +133,23 @@ function movePacman( game ) {
       p.dir = p.nextDir;
       p.nextDir = null;
     }
-    // Comer dot.
-    if ( grid[ p.y ][ p.x ] === 2 ) {
+    // Comer dot o power pellet.
+    const cell = grid[ p.y ][ p.x ];
+    if ( cell === 2 || cell === 4 ) {
       grid[ p.y ][ p.x ] = 0;
-      game.score += 10;
-      game.dotsRemaining--;
+      if ( cell === 2 ) {
+        game.score += 10;
+        game.dotsRemaining--;
+      } else {
+        game.score += PELLET_SCORE;
+        game.pelletsRemaining--;
+        // Activar (o reiniciar) el susto: los activos se dan la vuelta una vez.
+        game.frightened = FRIGHTENED_FRAMES;
+        game.eatenCombo = 0;
+        for ( const g of game.ghosts ) {
+          if ( g.state === 'active' ) g.dir = OPPOSITE[ g.dir ];
+        }
+      }
     }
     // Si no puede seguir, se detiene en la celda.
     if ( !canMove( grid, p.x, p.y, p.dir, 'pacman' ) ) return;
@@ -256,6 +287,21 @@ function greedyDir( g, choices, target, minimize ) {
   return best;
 }
 
+// "Asustado" no es un estado del fantasma: se deriva del temporizador global y
+// de que el fantasma este activo.
+function isFrightened( game, g ) {
+  return game.frightened > 0 && g.state === 'active';
+}
+
+// Velocidad efectiva del fantasma. Se recalcula solo en celdas alineadas para
+// no romper la alineacion ni la logica de giro por celda.
+function ghostSpeed( game, g ) {
+  if ( g.state === 'eaten' ) return EATEN_SPEED;
+  if ( isFrightened( game, g ) ) return FRIGHTENED_SPEED;
+  const rule = GHOST_RULES[ g.kind ] || GHOST_RULES.chaser;
+  return rule.speed;
+}
+
 const SHY_RADIUS = 8; // el shy huye si esta a 8 celdas o menos de Pac-Man
 
 function decideGhost( game, g ) {
@@ -264,6 +310,12 @@ function decideGhost( game, g ) {
   if ( !choices.length ) return;
 
   const pac = { x: Math.round( game.pacman.x ), y: Math.round( game.pacman.y ) };
+
+  // Asustado: huir maximizando la distancia Manhattan a Pac-Man.
+  if ( isFrightened( game, g ) ) {
+    g.dir = greedyDir( g, choices, pac, false );
+    return;
+  }
 
   if ( g.kind === 'chaser' ) {
     const step = nextStepTo( grid, g, pac );
@@ -307,6 +359,7 @@ function moveGhost( game, g ) {
   if ( aligned( g.x ) && aligned( g.y ) ) {
     g.x = Math.round( g.x );
     g.y = Math.round( g.y );
+    g.speed = ghostSpeed( game, g );
 
     let actor = 'ghost';
     if ( g.state === 'waiting' ) {
@@ -321,6 +374,15 @@ function moveGhost( game, g ) {
         g.y = PEN_EXIT_ROW;
         g.state = 'active';
       }
+    } else if ( g.state === 'eaten' ) {
+      // Los ojos vuelven a la guarida por el camino mas corto (BFS).
+      if ( g.x === EATEN_TARGET.x && g.y === EATEN_TARGET.y ) {
+        g.state = 'waiting';
+        g.wait = EATEN_WAIT;
+        return; // no se mueve este frame con la velocidad de 'eaten'
+      }
+      const step = nextStepTo( grid, g, EATEN_TARGET );
+      if ( step ) g.dir = step;
     } else {
       decideGhost( game, g );
     }
@@ -340,6 +402,9 @@ function resetPositions( game ) {
   p.y = PACMAN_START.y;
   p.dir = 'left';
   p.nextDir = null;
+  // Perder una vida corta el susto: no se premia morir devolviendo pellets.
+  game.frightened = 0;
+  game.eatenCombo = 0;
   game.ghosts.forEach( ( g, i ) => {
     Object.assign( g, ghostFromStart( GHOST_STARTS[ i ] ) );
   } );
@@ -350,22 +415,39 @@ function collides( a, b ) {
 }
 
 function update( game ) {
+  // El susto se descuenta una vez por frame; al llegar a 0 se cierra el combo.
+  if ( game.frightened > 0 ) {
+    game.frightened--;
+    if ( game.frightened === 0 ) game.eatenCombo = 0;
+  }
+
   movePacman( game );
   game.ghosts.forEach( ( g ) => moveGhost( game, g ) );
 
   for ( const g of game.ghosts ) {
-    if ( collides( game.pacman, g ) ) {
-      game.lives--;
-      if ( game.lives <= 0 ) {
-        game.state = 'lost';
-        return;
-      }
-      resetPositions( game );
-      break;
+    // Los ojos (eaten) no colisionan con Pac-Man.
+    if ( g.state === 'eaten' || !collides( game.pacman, g ) ) continue;
+
+    // Fantasma asustado: se lo come, sin perder vida y con puntuacion en combo.
+    if ( isFrightened( game, g ) ) {
+      g.state = 'eaten';
+      const i = Math.min( game.eatenCombo, GHOST_SCORES.length - 1 );
+      game.score += GHOST_SCORES[ i ];
+      game.eatenCombo++;
+      continue;
     }
+
+    game.lives--;
+    if ( game.lives <= 0 ) {
+      game.state = 'lost';
+      return;
+    }
+    resetPositions( game );
+    break;
   }
 
-  if ( game.dotsRemaining <= 0 ) game.state = 'won';
+  // La victoria exige comerse tambien los cuatro power pellets.
+  if ( game.dotsRemaining <= 0 && game.pelletsRemaining <= 0 ) game.state = 'won';
 }
 
 window.createGame = createGame;

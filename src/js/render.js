@@ -70,10 +70,11 @@ function drawDots( ctx, grid ) {
   ctx.fillStyle = DOT_COLOR;
   for ( let y = 0; y < grid.length; y++ ) {
     for ( let x = 0; x < grid[ 0 ].length; x++ ) {
-      if ( grid[ y ][ x ] !== 2 ) continue;
+      const v = grid[ y ][ x ];
+      if ( v !== 2 && v !== 4 ) continue;
       const { cx, cy } = cellCenter( x, y );
       ctx.beginPath();
-      ctx.arc( cx, cy, 2.5, 0, Math.PI * 2 );
+      ctx.arc( cx, cy, v === 4 ? 5 : 2.5, 0, Math.PI * 2 ); // pellet mas grande
       ctx.fill();
     }
   }
@@ -106,6 +107,12 @@ function drawGhost( ctx, g, color ) {
   const left = cx - r;
   const right = cx + r;
 
+  // Comido: solo los ojos vuelven a la guarida, sin cuerpo.
+  if ( g.state === 'eaten' ) {
+    drawGhostEyes( ctx, g );
+    return;
+  }
+
   ctx.fillStyle = color;
   ctx.beginPath();
   ctx.arc( cx, cy - 1, r, Math.PI, 0, false ); // cabeza
@@ -118,7 +125,12 @@ function drawGhost( ctx, g, color ) {
   ctx.closePath();
   ctx.fill();
 
-  // ojos mirando segun direccion
+  drawGhostEyes( ctx, g );
+}
+
+// Ojos del fantasma, mirando segun su direccion.
+function drawGhostEyes( ctx, g ) {
+  const { cx, cy } = cellCenter( g.x, g.y );
   const dir = DIRS[ g.dir ] || { x: 0, y: 0 };
   const ex = dir.x * 1.6;
   const ey = dir.y * 1.6;
@@ -151,6 +163,17 @@ const GHOST_COLORS = {
   flanker: '#00ffff', // cian
   shy: '#ffb852', // naranja
 };
+const FRIGHTENED_COLOR = '#2121ff'; // cuerpo azul del fantasma asustado
+
+// Color del cuerpo segun el estado global de susto. En los ultimos
+// FRIGHTENED_FLASH frames alterna azul/blanco cada 15 frames (aviso).
+function ghostColor( game, g, frame ) {
+  const frightened = game.frightened > 0 && g.state === 'active';
+  if ( !frightened ) return GHOST_COLORS[ g.kind ] || '#ff0000';
+  const flashing = game.frightened <= FRIGHTENED_FLASH;
+  if ( flashing && Math.floor( frame / 15 ) % 2 === 1 ) return '#fff';
+  return FRIGHTENED_COLOR;
+}
 
 function draw( ctx, game, frame ) {
   const grid = game.grid;
@@ -164,7 +187,7 @@ function draw( ctx, game, frame ) {
   drawDoor( ctx, grid );
   drawDots( ctx, grid );
   drawPacman( ctx, game.pacman, frame );
-  game.ghosts.forEach( ( g ) => drawGhost( ctx, g, GHOST_COLORS[ g.kind ] || '#ff0000' ) );
+  game.ghosts.forEach( ( g ) => drawGhost( ctx, g, ghostColor( game, g, frame ) ) );
   drawHUD( ctx, game, W );
 }
 
