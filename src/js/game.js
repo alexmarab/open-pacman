@@ -46,13 +46,20 @@ function createGame() {
   grid[ PACMAN_START.y ][ PACMAN_START.x ] = 0;
 
   let dots = 0;
-  for ( const row of grid ) for ( const v of row ) if ( v === 2 ) dots++;
+  let pellets = 0;
+  for ( const row of grid ) {
+    for ( const v of row ) {
+      if ( v === 2 ) dots++;
+      if ( v === 4 ) pellets++;
+    }
+  }
 
   return {
     state: 'start',
     score: 0,
     lives: 3,
     dotsRemaining: dots,
+    pelletsRemaining: pellets,
     grid,
     pacman: {
       x: PACMAN_START.x,
