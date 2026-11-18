@@ -201,6 +201,53 @@ function nextStepTo( grid, from, to ) {
   return Number.isFinite( bestDist ) ? best : null;
 }
 
+// Distancia Manhattan entre dos celdas (acepta posiciones fraccionarias).
+function manhattan( a, b ) {
+  return Math.abs( Math.round( a.x ) - Math.round( b.x ) ) + Math.abs( Math.round( a.y ) - Math.round( b.y ) );
+}
+
+// Recorta una celda a los limites de la rejilla.
+function clampCell( grid, x, y ) {
+  return {
+    x: Math.max( 0, Math.min( grid[ 0 ].length - 1, x ) ),
+    y: Math.max( 0, Math.min( grid.length - 1, y ) ),
+  };
+}
+
+// Celda objetivo de las personalidades que no usan BFS.
+function ghostTarget( game, g ) {
+  const grid = game.grid;
+  const p = game.pacman;
+  const px = Math.round( p.x );
+  const py = Math.round( p.y );
+  const pd = DIRS[ p.dir ] || { x: 0, y: 0 };
+
+  let target = { x: px, y: py };
+  if ( g.kind === 'ambusher' ) {
+    // 4 celdas por delante de Pac-Man, recortado a los limites.
+    target = clampCell( grid, px + pd.x * 4, py + pd.y * 4 );
+  }
+
+  // Si el objetivo cae en muro, apuntar a la celda de Pac-Man.
+  return isWall( grid, target.x, target.y, 'ghost' ) ? { x: px, y: py } : target;
+}
+
+// Direccion que minimiza (o maximiza) la distancia Manhattan al objetivo entre
+// los candidatos, en su orden de desempate.
+function greedyDir( g, choices, target, minimize ) {
+  let best = choices[ 0 ];
+  let bestDist = minimize ? Infinity : -Infinity;
+  for ( const dir of choices ) {
+    const d = DIRS[ dir ];
+    const dist = Math.abs( g.x + d.x - target.x ) + Math.abs( g.y + d.y - target.y );
+    if ( minimize ? dist < bestDist : dist > bestDist ) {
+      bestDist = dist;
+      best = dir;
+    }
+  }
+  return best;
+}
+
 function decideGhost( game, g ) {
   const grid = game.grid;
   const choices = ghostChoices( grid, g );
@@ -211,6 +258,11 @@ function decideGhost( game, g ) {
     const step = nextStepTo( grid, g, target );
     // Sin camino: una direccion aleatoria valida para no quedarse quieto.
     g.dir = step || choices[ Math.floor( Math.random() * choices.length ) ];
+    return;
+  }
+
+  if ( g.kind === 'ambusher' ) {
+    g.dir = greedyDir( g, choices, ghostTarget( game, g ), true );
     return;
   }
 
