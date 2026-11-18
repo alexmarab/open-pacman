@@ -413,15 +413,25 @@ function update( game ) {
   game.ghosts.forEach( ( g ) => moveGhost( game, g ) );
 
   for ( const g of game.ghosts ) {
-    if ( collides( game.pacman, g ) ) {
-      game.lives--;
-      if ( game.lives <= 0 ) {
-        game.state = 'lost';
-        return;
-      }
-      resetPositions( game );
-      break;
+    // Los ojos (eaten) no colisionan con Pac-Man.
+    if ( g.state === 'eaten' || !collides( game.pacman, g ) ) continue;
+
+    // Fantasma asustado: se lo come, sin perder vida y con puntuacion en combo.
+    if ( isFrightened( game, g ) ) {
+      g.state = 'eaten';
+      const i = Math.min( game.eatenCombo, GHOST_SCORES.length - 1 );
+      game.score += GHOST_SCORES[ i ];
+      game.eatenCombo++;
+      continue;
     }
+
+    game.lives--;
+    if ( game.lives <= 0 ) {
+      game.state = 'lost';
+      return;
+    }
+    resetPositions( game );
+    break;
   }
 
   if ( game.dotsRemaining <= 0 ) game.state = 'won';
