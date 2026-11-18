@@ -9,6 +9,8 @@ const DIRS = {
   down: { x: 0, y: 1 },
 };
 const OPPOSITE = { left: 'right', right: 'left', up: 'down', down: 'up' };
+// Orden de desempate comun a toda la IA: tras la direccion actual.
+const TIE_ORDER = [ 'left', 'right', 'up', 'down' ];
 
 const PACMAN_SPEED = 0.125; // 1/8 celda/frame -> alinea cada 8 frames
 
@@ -127,35 +129,92 @@ function movePacman( game ) {
   wrapTunnel( p, width );
 }
 
+// En la fila del tunel, salir por un borde entra por el opuesto.
+function wrapX( x, y, width ) {
+  if ( y !== TUNNEL_ROW ) return x;
+  if ( x < 0 ) return width - 1;
+  if ( x >= width ) return 0;
+  return x;
+}
+
+// Candidatos de giro en una celda, en orden de desempate: primero la direccion
+// actual y luego left/right/up/down. Se excluye el giro de 180 salvo que sea la
+// unica salida (callejon sin salida).
+function ghostChoices( grid, g ) {
+  const options = [];
+  for ( const dir of [ g.dir, ...TIE_ORDER ] ) {
+    if ( !dir || dir === OPPOSITE[ g.dir ] || options.includes( dir ) ) continue;
+    if ( canMove( grid, g.x, g.y, dir, 'ghost' ) ) options.push( dir );
+  }
+  if ( options.length ) return options;
+  const back = OPPOSITE[ g.dir ];
+  return canMove( grid, g.x, g.y, back, 'ghost' ) ? [ back ] : [];
+}
+
+// Distancia en celdas por el camino mas corto entre dos celdas (BFS sobre la
+// rejilla, tunel incluido). Devuelve Infinity si no hay camino.
+function bfsDistance( grid, from, to ) {
+  const W = grid[ 0 ].length;
+  const H = grid.length;
+  const dist = new Array( W * H ).fill( -1 );
+  const start = from.y * W + from.x;
+  const goal = to.y * W + to.x;
+  dist[ start ] = 0;
+  const queue = [ start ];
+  for ( let head = 0; head < queue.length; head++ ) {
+    const cell = queue[ head ];
+    if ( cell === goal ) return dist[ cell ];
+    const cx = cell % W;
+    const cy = ( cell - cx ) / W;
+    for ( const dir of TIE_ORDER ) {
+      if ( !canMove( grid, cx, cy, dir, 'ghost' ) ) continue;
+      const d = DIRS[ dir ];
+      const ny = cy + d.y;
+      const nx = wrapX( cx + d.x, ny, W );
+      const next = ny * W + nx;
+      if ( dist[ next ] !== -1 ) continue;
+      dist[ next ] = dist[ cell ] + 1;
+      queue.push( next );
+    }
+  }
+  return Infinity;
+}
+
+// Direccion del primer paso del camino mas corto (BFS) desde la celda de 'from'
+// hasta 'to'. Aplica la regla de desempate comun: sin giro de 180 salvo
+// callejon, candidatos en orden de ghostChoices y gana el primero con mejor
+// distancia. Devuelve null si no hay camino.
+function nextStepTo( grid, from, to ) {
+  const choices = ghostChoices( grid, from );
+  let best = null;
+  let bestDist = Infinity;
+  for ( const dir of choices ) {
+    const d = DIRS[ dir ];
+    const ny = from.y + d.y;
+    const nx = wrapX( from.x + d.x, ny, grid[ 0 ].length );
+    const dist = bfsDistance( grid, { x: nx, y: ny }, to );
+    if ( dist < bestDist ) {
+      bestDist = dist;
+      best = dir;
+    }
+  }
+  return Number.isFinite( bestDist ) ? best : null;
+}
+
 function decideGhost( game, g ) {
   const grid = game.grid;
-  const p = game.pacman;
+  const choices = ghostChoices( grid, g );
+  if ( !choices.length ) return;
 
-  const options = Object.keys( DIRS ).filter(
-    ( dir ) => dir !== OPPOSITE[ g.dir ] && canMove( grid, g.x, g.y, dir, 'ghost' )
-  );
-  // Sin salida (callejon): permitir el giro de 180.
-  const choices = options.length ? options : [ '' + OPPOSITE[ g.dir ] ];
-
-  if ( g.kind === 'hunter' ) {
-    const px = Math.round( p.x );
-    const py = Math.round( p.y );
-    let best = choices[ 0 ];
-    let bestDist = Infinity;
-    for ( const dir of choices ) {
-      const d = DIRS[ dir ];
-      const nx = g.x + d.x;
-      const ny = g.y + d.y;
-      const dist = Math.abs( nx - px ) + Math.abs( ny - py );
-      if ( dist < bestDist ) {
-        bestDist = dist;
-        best = dir;
-      }
-    }
-    g.dir = best;
-  } else {
-    g.dir = choices[ Math.floor( Math.random() * choices.length ) ];
+  if ( g.kind === 'chaser' ) {
+    const target = { x: Math.round( game.pacman.x ), y: Math.round( game.pacman.y ) };
+    const step = nextStepTo( grid, g, target );
+    // Sin camino: una direccion aleatoria valida para no quedarse quieto.
+    g.dir = step || choices[ Math.floor( Math.random() * choices.length ) ];
+    return;
   }
+
+  g.dir = choices[ Math.floor( Math.random() * choices.length ) ];
 }
 
 // Ciclo de la guarida. 'waiting' cuenta frames y rebota en vertical dentro de
