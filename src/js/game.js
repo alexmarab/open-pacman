@@ -13,6 +13,7 @@ const OPPOSITE = { left: 'right', right: 'left', up: 'down', down: 'up' };
 const TIE_ORDER = [ 'left', 'right', 'up', 'down' ];
 
 const PACMAN_SPEED = 0.0625; // 1/16 celda/frame -> alinea cada 16 frames
+const PELLET_SCORE = 50; // puntos por power pellet
 
 // Personalidad por tipo: velocidad (celdas/frame) y frames de espera en la
 // guarida antes de poder salir. Las fracciones 1/16 y 1/20 alinean en enteros
@@ -121,11 +122,17 @@ function movePacman( game ) {
       p.dir = p.nextDir;
       p.nextDir = null;
     }
-    // Comer dot.
-    if ( grid[ p.y ][ p.x ] === 2 ) {
+    // Comer dot o power pellet.
+    const cell = grid[ p.y ][ p.x ];
+    if ( cell === 2 || cell === 4 ) {
       grid[ p.y ][ p.x ] = 0;
-      game.score += 10;
-      game.dotsRemaining--;
+      if ( cell === 2 ) {
+        game.score += 10;
+        game.dotsRemaining--;
+      } else {
+        game.score += PELLET_SCORE;
+        game.pelletsRemaining--;
+      }
     }
     // Si no puede seguir, se detiene en la celda.
     if ( !canMove( grid, p.x, p.y, p.dir, 'pacman' ) ) return;
