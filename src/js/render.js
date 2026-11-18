@@ -152,6 +152,17 @@ const GHOST_COLORS = {
   flanker: '#00ffff', // cian
   shy: '#ffb852', // naranja
 };
+const FRIGHTENED_COLOR = '#2121ff'; // cuerpo azul del fantasma asustado
+
+// Color del cuerpo segun el estado global de susto. En los ultimos
+// FRIGHTENED_FLASH frames alterna azul/blanco cada 15 frames (aviso).
+function ghostColor( game, g, frame ) {
+  const frightened = game.frightened > 0 && g.state === 'active';
+  if ( !frightened ) return GHOST_COLORS[ g.kind ] || '#ff0000';
+  const flashing = game.frightened <= FRIGHTENED_FLASH;
+  if ( flashing && Math.floor( frame / 15 ) % 2 === 1 ) return '#fff';
+  return FRIGHTENED_COLOR;
+}
 
 function draw( ctx, game, frame ) {
   const grid = game.grid;
@@ -165,7 +176,7 @@ function draw( ctx, game, frame ) {
   drawDoor( ctx, grid );
   drawDots( ctx, grid );
   drawPacman( ctx, game.pacman, frame );
-  game.ghosts.forEach( ( g ) => drawGhost( ctx, g, GHOST_COLORS[ g.kind ] || '#ff0000' ) );
+  game.ghosts.forEach( ( g ) => drawGhost( ctx, g, ghostColor( game, g, frame ) ) );
   drawHUD( ctx, game, W );
 }
 
