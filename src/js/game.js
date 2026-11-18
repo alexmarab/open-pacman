@@ -13,7 +13,16 @@ const OPPOSITE = { left: 'right', right: 'left', up: 'down', down: 'up' };
 const TIE_ORDER = [ 'left', 'right', 'up', 'down' ];
 
 const PACMAN_SPEED = 0.0625; // 1/16 celda/frame -> alinea cada 16 frames
+
+// Power pellets y modo asustado.
 const PELLET_SCORE = 50; // puntos por power pellet
+const FRIGHTENED_FRAMES = 360; // ~6 s a 60 fps
+const FRIGHTENED_FLASH = 60; // ultimos frames de aviso
+const FRIGHTENED_SPEED = 0.03125; // 1/32 celda/frame
+const EATEN_SPEED = 0.125; // 1/8 celda/frame: los ojos vuelven a la guarida
+const EATEN_WAIT = 60; // frames en la guarida antes de volver a salir
+const GHOST_SCORES = [ 200, 400, 800, 1600 ]; // orden de fantasmas comidos
+const EATEN_TARGET = { x: 13, y: 13 }; // celda de la guarida a la que vuelven los ojos
 
 // Personalidad por tipo: velocidad (celdas/frame) y frames de espera en la
 // guarida antes de poder salir. Las fracciones 1/16 y 1/20 alinean en enteros
@@ -61,6 +70,8 @@ function createGame() {
     lives: 3,
     dotsRemaining: dots,
     pelletsRemaining: pellets,
+    frightened: 0, // frames de susto restantes; 0 = sin susto
+    eatenCombo: 0, // fantasmas comidos con el pellet actual (0..4)
     grid,
     pacman: {
       x: PACMAN_START.x,
@@ -132,6 +143,12 @@ function movePacman( game ) {
       } else {
         game.score += PELLET_SCORE;
         game.pelletsRemaining--;
+        // Activar (o reiniciar) el susto: los activos se dan la vuelta una vez.
+        game.frightened = FRIGHTENED_FRAMES;
+        game.eatenCombo = 0;
+        for ( const g of game.ghosts ) {
+          if ( g.state === 'active' ) g.dir = OPPOSITE[ g.dir ];
+        }
       }
     }
     // Si no puede seguir, se detiene en la celda.
@@ -270,6 +287,21 @@ function greedyDir( g, choices, target, minimize ) {
   return best;
 }
 
+// "Asustado" no es un estado del fantasma: se deriva del temporizador global y
+// de que el fantasma este activo.
+function isFrightened( game, g ) {
+  return game.frightened > 0 && g.state === 'active';
+}
+
+// Velocidad efectiva del fantasma. Se recalcula solo en celdas alineadas para
+// no romper la alineacion ni la logica de giro por celda.
+function ghostSpeed( game, g ) {
+  if ( g.state === 'eaten' ) return EATEN_SPEED;
+  if ( isFrightened( game, g ) ) return FRIGHTENED_SPEED;
+  const rule = GHOST_RULES[ g.kind ] || GHOST_RULES.chaser;
+  return rule.speed;
+}
+
 const SHY_RADIUS = 8; // el shy huye si esta a 8 celdas o menos de Pac-Man
 
 function decideGhost( game, g ) {
@@ -278,6 +310,12 @@ function decideGhost( game, g ) {
   if ( !choices.length ) return;
 
   const pac = { x: Math.round( game.pacman.x ), y: Math.round( game.pacman.y ) };
+
+  // Asustado: huir maximizando la distancia Manhattan a Pac-Man.
+  if ( isFrightened( game, g ) ) {
+    g.dir = greedyDir( g, choices, pac, false );
+    return;
+  }
 
   if ( g.kind === 'chaser' ) {
     const step = nextStepTo( grid, g, pac );
@@ -321,6 +359,7 @@ function moveGhost( game, g ) {
   if ( aligned( g.x ) && aligned( g.y ) ) {
     g.x = Math.round( g.x );
     g.y = Math.round( g.y );
+    g.speed = ghostSpeed( game, g );
 
     let actor = 'ghost';
     if ( g.state === 'waiting' ) {
@@ -364,6 +403,12 @@ function collides( a, b ) {
 }
 
 function update( game ) {
+  // El susto se descuenta una vez por frame; al llegar a 0 se cierra el combo.
+  if ( game.frightened > 0 ) {
+    game.frightened--;
+    if ( game.frightened === 0 ) game.eatenCombo = 0;
+  }
+
   movePacman( game );
   game.ghosts.forEach( ( g ) => moveGhost( game, g ) );
 
