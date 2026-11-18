@@ -12,15 +12,16 @@ const OPPOSITE = { left: 'right', right: 'left', up: 'down', down: 'up' };
 // Orden de desempate comun a toda la IA: tras la direccion actual.
 const TIE_ORDER = [ 'left', 'right', 'up', 'down' ];
 
-const PACMAN_SPEED = 0.125; // 1/8 celda/frame -> alinea cada 8 frames
+const PACMAN_SPEED = 0.0625; // 1/16 celda/frame -> alinea cada 16 frames
 
 // Personalidad por tipo: velocidad (celdas/frame) y frames de espera en la
-// guarida antes de poder salir. Las fracciones 1/8 y 1/10 alinean en enteros.
+// guarida antes de poder salir. Las fracciones 1/16 y 1/20 alinean en enteros
+// (cada 16 y 20 frames) y no rompen la logica de giro por celda.
 const GHOST_RULES = {
-  chaser: { speed: 0.125, releaseAfter: 0 },
-  ambusher: { speed: 0.1, releaseAfter: 90 },
-  flanker: { speed: 0.1, releaseAfter: 180 },
-  shy: { speed: 0.1, releaseAfter: 270 },
+  chaser: { speed: 0.0625, releaseAfter: 0 },
+  ambusher: { speed: 0.05, releaseAfter: 90 },
+  flanker: { speed: 0.05, releaseAfter: 180 },
+  shy: { speed: 0.05, releaseAfter: 270 },
 };
 
 // Estado inicial de un fantasma a partir de su entrada en GHOST_STARTS.
