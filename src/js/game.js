@@ -67,14 +67,15 @@ function aligned( v ) {
 }
 
 // Una celda es muro para el actor dado?
-//   pacman: bloqueado por pared (1) y puerta (3)
-//   ghost:  bloqueado solo por pared (1)
+//   pacman:     bloqueado por pared (1) y puerta (3)
+//   ghost:      bloqueado solo por pared (1)
+//   ghost-wait: fantasma esperando en la guarida; la puerta (3) tambien le bloquea
 function isWall( grid, x, y, actor ) {
   if ( y < 0 || y >= grid.length ) return true;
   if ( x < 0 || x >= grid[ 0 ].length ) return true;
   const v = grid[ y ][ x ];
   if ( v === 1 ) return true;
-  if ( v === 3 && actor === 'pacman' ) return true;
+  if ( v === 3 && ( actor === 'pacman' || actor === 'ghost-wait' ) ) return true;
   return false;
 }
 
@@ -157,15 +158,45 @@ function decideGhost( game, g ) {
   }
 }
 
+// Ciclo de la guarida. 'waiting' cuenta frames y rebota en vertical dentro de
+// la pen; 'exiting' sube recto por la puerta hasta el pasillo de la fila 11 y
+// pasa a 'active'; 'active' usa la personalidad de su tipo.
+const PEN_TOP = 13;
+const PEN_BOTTOM = 15;
+const PEN_EXIT_ROW = 11;
+
 function moveGhost( game, g ) {
   const grid = game.grid;
   const width = grid[ 0 ].length;
 
+  // La espera se mide en frames, no en celdas alineadas.
+  if ( g.state === 'waiting' ) {
+    if ( g.wait > 0 ) g.wait--;
+    if ( g.wait <= 0 ) g.state = 'exiting';
+  }
+
   if ( aligned( g.x ) && aligned( g.y ) ) {
     g.x = Math.round( g.x );
     g.y = Math.round( g.y );
-    decideGhost( game, g );
-    if ( !canMove( grid, g.x, g.y, g.dir, 'ghost' ) ) return;
+
+    let actor = 'ghost';
+    if ( g.state === 'waiting' ) {
+      actor = 'ghost-wait';
+      // Rebote vertical entre las filas 13 y 15 de su columna.
+      if ( g.y <= PEN_TOP ) g.dir = 'down';
+      else if ( g.y >= PEN_BOTTOM ) g.dir = 'up';
+      if ( !canMove( grid, g.x, g.y, g.dir, actor ) ) g.dir = OPPOSITE[ g.dir ];
+    } else if ( g.state === 'exiting' ) {
+      g.dir = 'up';
+      if ( g.y <= PEN_EXIT_ROW ) {
+        g.y = PEN_EXIT_ROW;
+        g.state = 'active';
+      }
+    } else {
+      decideGhost( game, g );
+    }
+
+    if ( !canMove( grid, g.x, g.y, g.dir, actor ) ) return;
   }
 
   const d = DIRS[ g.dir ];
