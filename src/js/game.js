@@ -446,7 +446,8 @@ function update( game ) {
     break;
   }
 
-  if ( game.dotsRemaining <= 0 ) game.state = 'won';
+  // La victoria exige comerse tambien los cuatro power pellets.
+  if ( game.dotsRemaining <= 0 && game.pelletsRemaining <= 0 ) game.state = 'won';
 }
 
 window.createGame = createGame;
