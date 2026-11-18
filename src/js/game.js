@@ -374,6 +374,15 @@ function moveGhost( game, g ) {
         g.y = PEN_EXIT_ROW;
         g.state = 'active';
       }
+    } else if ( g.state === 'eaten' ) {
+      // Los ojos vuelven a la guarida por el camino mas corto (BFS).
+      if ( g.x === EATEN_TARGET.x && g.y === EATEN_TARGET.y ) {
+        g.state = 'waiting';
+        g.wait = EATEN_WAIT;
+        return; // no se mueve este frame con la velocidad de 'eaten'
+      }
+      const step = nextStepTo( grid, g, EATEN_TARGET );
+      if ( step ) g.dir = step;
     } else {
       decideGhost( game, g );
     }

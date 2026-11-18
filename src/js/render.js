@@ -107,6 +107,12 @@ function drawGhost( ctx, g, color ) {
   const left = cx - r;
   const right = cx + r;
 
+  // Comido: solo los ojos vuelven a la guarida, sin cuerpo.
+  if ( g.state === 'eaten' ) {
+    drawGhostEyes( ctx, g );
+    return;
+  }
+
   ctx.fillStyle = color;
   ctx.beginPath();
   ctx.arc( cx, cy - 1, r, Math.PI, 0, false ); // cabeza
@@ -119,7 +125,12 @@ function drawGhost( ctx, g, color ) {
   ctx.closePath();
   ctx.fill();
 
-  // ojos mirando segun direccion
+  drawGhostEyes( ctx, g );
+}
+
+// Ojos del fantasma, mirando segun su direccion.
+function drawGhostEyes( ctx, g ) {
+  const { cx, cy } = cellCenter( g.x, g.y );
   const dir = DIRS[ g.dir ] || { x: 0, y: 0 };
   const ex = dir.x * 1.6;
   const ey = dir.y * 1.6;
