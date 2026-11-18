@@ -402,6 +402,9 @@ function resetPositions( game ) {
   p.y = PACMAN_START.y;
   p.dir = 'left';
   p.nextDir = null;
+  // Perder una vida corta el susto: no se premia morir devolviendo pellets.
+  game.frightened = 0;
+  game.eatenCombo = 0;
   game.ghosts.forEach( ( g, i ) => {
     Object.assign( g, ghostFromStart( GHOST_STARTS[ i ] ) );
   } );
